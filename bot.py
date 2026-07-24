@@ -4,7 +4,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from anthropic import Anthropic
-import PyPDF2
+from pypdf import PdfReader
 from docx import Document
 import io
 
@@ -34,7 +34,7 @@ class ResumeAISession:
 def extract_pdf_text(pdf_file):
     """Extract text from PDF file"""
     try:
-        reader = PyPDF2.PdfReader(io.BytesIO(pdf_file))
+reader = PdfReader(io.BytesIO(pdf_file))
         text = ""
         for page in reader.pages:
             text += page.extract_text()
