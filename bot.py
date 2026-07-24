@@ -3,7 +3,7 @@ import json
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from anthropic import Anthropic
+from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document
 import io
@@ -11,9 +11,12 @@ import io
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CLAUDE_MODEL = "claude-sonnet-4-5"  # change here for a different Claude model
+OLLAMA_MODEL = "llama3.1"  # change here to whatever model you've pulled with `ollama pull`
 
-client = Anthropic()
+client = OpenAI(
+    base_url="http://localhost:11434/v1",
+    api_key="ollama",  # Ollama doesn't check this, but the SDK requires something non-empty
+)
 
 WAITING_FOR_JD, WAITING_FOR_RESUME, WAITING_FOR_ACTION = range(3)
 
@@ -183,15 +186,15 @@ RESUME:
 
 Provide ONLY valid JSON, no markdown or extra text."""
     
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
+    response = client.chat.completions.create(
+        model=OLLAMA_MODEL,
         max_tokens=1500,
         messages=[
             {"role": "user", "content": prompt}
         ]
     )
     
-    response_text = response.content[0].text
+    response_text = response.choices[0].message.content
     
     try:
         analysis = json.loads(response_text)
@@ -262,15 +265,15 @@ Job Description:
 
 Provide the complete rewritten resume. Do not add commentary, just the resume text."""
     
-    response = client.messages.create(
-        model=CLAUDE_MODEL,
+    response = client.chat.completions.create(
+        model=OLLAMA_MODEL,
         max_tokens=2000,
         messages=[
             {"role": "user", "content": prompt}
         ]
     )
     
-    return response.content[0].text
+    return response.choices[0].message.content
 
 async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -321,8 +324,6 @@ def main():
     token = os.environ.get('TELEGRAM_BOT_TOKEN')
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
-    if not os.environ.get('ANTHROPIC_API_KEY'):
-        raise ValueError("ANTHROPIC_API_KEY environment variable not set")
     
     app = Application.builder().token(token).build()
     
