@@ -329,11 +329,7 @@ def main():
     
     app = Application.builder().token(token).build()
     
-    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("reset", reset))
-    app.add_handler(CommandHandler("analyze", show_analysis))
-    app.add_handler(CommandHandler("modify", modify_resume))
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
