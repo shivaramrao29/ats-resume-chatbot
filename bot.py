@@ -11,11 +11,11 @@ import io
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-OPENROUTER_MODEL = "deepseek/deepseek-r1:free"  # free model, no credits needed - change here to try others
+OLLAMA_MODEL = "llama3.1"  # change here to whatever model you've pulled with `ollama pull`
 
 client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.environ.get("OPENROUTER_API_KEY"),
+    base_url="http://localhost:11434/v1",
+    api_key="ollama",  # Ollama doesn't check this, but the SDK requires something non-empty
 )
 
 WAITING_FOR_JD, WAITING_FOR_RESUME, WAITING_FOR_ACTION = range(3)
@@ -187,7 +187,7 @@ RESUME:
 Provide ONLY valid JSON, no markdown or extra text."""
     
     response = client.chat.completions.create(
-        model=OPENROUTER_MODEL,
+        model=OLLAMA_MODEL,
         max_tokens=1500,
         messages=[
             {"role": "user", "content": prompt}
@@ -266,7 +266,7 @@ Job Description:
 Provide the complete rewritten resume. Do not add commentary, just the resume text."""
     
     response = client.chat.completions.create(
-        model=OPENROUTER_MODEL,
+        model=OLLAMA_MODEL,
         max_tokens=2000,
         messages=[
             {"role": "user", "content": prompt}
@@ -324,8 +324,6 @@ def main():
     token = os.environ.get('TELEGRAM_BOT_TOKEN')
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
-    if not os.environ.get('OPENROUTER_API_KEY'):
-        raise ValueError("OPENROUTER_API_KEY environment variable not set")
     
     app = Application.builder().token(token).build()
     
