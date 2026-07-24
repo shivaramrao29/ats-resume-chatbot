@@ -3,38 +3,37 @@ import json
 import logging
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
-from anthropic import Anthropic
+from openai import OpenAI
 from pypdf import PdfReader
 from docx import Document
 import io
 
-# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Anthropic client
-client = Anthropic()
+OPENROUTER_MODEL = "anthropic/claude-opus-4.8"  # change here if you want a different Opus version
 
-# States for conversation flow
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ.get("OPENROUTER_API_KEY"),
+)
+
 WAITING_FOR_JD, WAITING_FOR_RESUME, WAITING_FOR_ACTION = range(3)
 
-# Store user sessions
 user_sessions = {}
 
 class ResumeAISession:
     def __init__(self):
         self.jd = None
-        self.resumes = {}  # {resume_name: resume_text}
-        self.scores = {}   # {resume_name: {score, gaps, suggestions}}
-        self.conversation_history = []
+        self.resumes = {}
+        self.scores = {}
     
     def reset(self):
         self.__init__()
 
 def extract_pdf_text(pdf_file):
-    """Extract text from PDF file"""
     try:
-reader = PdfReader(io.BytesIO(pdf_file))
+        reader = PdfReader(io.BytesIO(pdf_file))
         text = ""
         for page in reader.pages:
             text += page.extract_text()
@@ -44,7 +43,6 @@ reader = PdfReader(io.BytesIO(pdf_file))
         return None
 
 def extract_docx_text(docx_file):
-    """Extract text from DOCX file"""
     try:
         doc = Document(io.BytesIO(docx_file))
         text = ""
@@ -56,7 +54,6 @@ def extract_docx_text(docx_file):
         return None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Start command"""
     user_id = update.effective_user.id
     user_sessions[user_id] = ResumeAISession()
     
@@ -71,7 +68,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_JD
 
 async def handle_jd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle JD input (text or document)"""
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
     
@@ -79,7 +75,6 @@ async def handle_jd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session = ResumeAISession()
         user_sessions[user_id] = session
     
-    # Handle text JD
     if update.message.text:
         session.jd = update.message.text
         await update.message.reply_text(
@@ -90,7 +85,6 @@ async def handle_jd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return WAITING_FOR_RESUME
     
-    # Handle document JD
     elif update.message.document:
         file = await update.message.effective_attachment.get_file()
         file_bytes = await file.download_as_bytearray()
@@ -118,7 +112,6 @@ async def handle_jd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return WAITING_FOR_JD
 
 async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle resume upload"""
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
     
@@ -131,7 +124,6 @@ async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
         file_bytes = await file.download_as_bytearray()
         file_name = update.message.document.file_name.lower()
         
-        # Extract resume text
         if file_name.endswith('.pdf'):
             resume_text = extract_pdf_text(file_bytes)
         elif file_name.endswith('.docx'):
@@ -144,19 +136,15 @@ async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Failed to extract text from resume")
             return WAITING_FOR_RESUME
         
-        # Store resume
         resume_name = file_name.replace('.pdf', '').replace('.docx', '')
         session.resumes[resume_name] = resume_text
         
-        # Show processing message
         await update.message.reply_text(f"📄 Resume '{resume_name}' received. Analyzing...\n\n⏳ This may take 30 seconds...")
         
-        # Analyze resume using Claude
         try:
             analysis = await analyze_resume_with_claude(session.jd, resume_text, resume_name)
             session.scores[resume_name] = analysis
             
-            # Format response
             response = f"📊 **Analysis for {resume_name}**\n\n"
             response += f"🎯 **ATS Score**: {analysis['ats_score']}/100\n\n"
             response += f"**Strengths:**\n{analysis['strengths']}\n\n"
@@ -180,7 +168,6 @@ async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_RESUME
 
 async def analyze_resume_with_claude(jd, resume, resume_name):
-    """Use Claude to analyze resume against JD"""
     prompt = f"""You are an ATS (Applicant Tracking System) expert and resume optimizer.
 
 Analyze the following resume against the job description and provide:
@@ -199,21 +186,19 @@ RESUME:
 
 Provide ONLY valid JSON, no markdown or extra text."""
     
-    response = client.messages.create(
-        model="claude-opus-4-1",
+    response = client.chat.completions.create(
+        model=OPENROUTER_MODEL,
         max_tokens=1500,
         messages=[
             {"role": "user", "content": prompt}
         ]
     )
     
-    response_text = response.content[0].text
+    response_text = response.choices[0].message.content
     
-    # Parse JSON response
     try:
         analysis = json.loads(response_text)
     except:
-        # Fallback if JSON parsing fails
         analysis = {
             "ats_score": 65,
             "strengths": "Unable to parse response",
@@ -224,7 +209,6 @@ Provide ONLY valid JSON, no markdown or extra text."""
     return analysis
 
 async def modify_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Modify a resume based on suggestions"""
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
     
@@ -232,7 +216,6 @@ async def modify_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ No session found. Use /start")
         return WAITING_FOR_RESUME
     
-    # Parse command
     args = update.message.text.split()
     if len(args) < 2:
         await update.message.reply_text("❌ Usage: /modify resume_name")
@@ -253,11 +236,9 @@ async def modify_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session.scores[resume_name]['suggestions']
         )
         
-        # Save modified version
         modified_name = f"{resume_name}_modified"
         session.resumes[modified_name] = modified_resume
         
-        # Send as text (Telegram limitation - can't send DOCX directly)
         await update.message.reply_text(
             f"✅ **Modified Resume for {resume_name}**\n\n"
             f"```\n{modified_resume[:3000]}\n...\n```\n\n"
@@ -269,7 +250,6 @@ async def modify_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_RESUME
 
 async def regenerate_resume_with_claude(jd, resume, suggestions):
-    """Regenerate resume with improvements"""
     prompt = f"""You are an expert resume writer. Rewrite the following resume to better match the job description.
 
 Apply these specific improvements:
@@ -285,18 +265,17 @@ Job Description:
 
 Provide the complete rewritten resume. Do not add commentary, just the resume text."""
     
-    response = client.messages.create(
-        model="claude-opus-4-1",
+    response = client.chat.completions.create(
+        model=OPENROUTER_MODEL,
         max_tokens=2000,
         messages=[
             {"role": "user", "content": prompt}
         ]
     )
     
-    return response.content[0].text
+    return response.choices[0].message.content
 
 async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all resume analyses"""
     user_id = update.effective_user.id
     session = user_sessions.get(user_id)
     
@@ -312,14 +291,12 @@ async def show_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return WAITING_FOR_RESUME
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Reset session"""
     user_id = update.effective_user.id
     user_sessions[user_id] = ResumeAISession()
     await update.message.reply_text("🔄 Session reset! Use /start to begin again.")
     return WAITING_FOR_JD
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show help"""
     help_text = """
 🤖 **ATS Resume AI Bot - Help**
 
@@ -344,21 +321,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
 def main():
-    """Start the bot"""
     token = os.environ.get('TELEGRAM_BOT_TOKEN')
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set")
+    if not os.environ.get('OPENROUTER_API_KEY'):
+        raise ValueError("OPENROUTER_API_KEY environment variable not set")
     
     app = Application.builder().token(token).build()
     
-    # Add handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(CommandHandler("analyze", show_analysis))
     app.add_handler(CommandHandler("modify", modify_resume))
     
-    # Conversation handler for JD -> Resume flow
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
@@ -374,10 +350,7 @@ def main():
     )
     
     app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.TEXT, handle_jd))
-    app.add_handler(MessageHandler(filters.Document.ALL, handle_resume))
     
-    # Start bot
     app.run_polling()
 
 if __name__ == '__main__':
