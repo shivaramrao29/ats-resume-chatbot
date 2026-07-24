@@ -11,7 +11,7 @@ import io
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-OPENROUTER_MODEL = "anthropic/claude-opus-4.8"  # change here if you want a different Opus version
+OPENROUTER_MODEL = "deepseek/deepseek-r1:free"  # free model, no credits needed - change here to try others
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
